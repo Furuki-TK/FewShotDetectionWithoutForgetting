@@ -113,8 +113,20 @@ def load_pretrained(network, pretrained_path):
 
 if __name__ == '__main__':
     feat_model = init_network()
-    input = torch.randn(4, 3, 84, 84)
+    input = torch.randn(1, 3, 84, 84)
     out = feat_model(input)
 
+    count = 0
     for x in out:
-        print(x, x.size(), type(x))
+        count += 1
+        xx = np.squeeze(x.data.cpu().numpy())
+        for i in range(len(xx[0])):
+            mask = cv2.resize(xx[0][i], 84)
+            mask = mask - np.min(mask)
+
+            if np.max(mask) != 0:
+                mask = mask / np.max(mask)
+
+            feature_map = np.float32(cv2.applyColorMap(np.uint8(255 * mask), cv2.COLORMAP_JET))
+            output_name = 'feature_Conv'+str(count) + '_' +str(i) +'.png'
+            cv2.imwrite(output_name,feature_map)
