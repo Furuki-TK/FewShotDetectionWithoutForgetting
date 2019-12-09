@@ -1,0 +1,22 @@
+# With Pascal VOC dataset training first step command cheatsheet
+
+CUDA_VISIBLE_DEVICES=0 python -W ignore train_voc.py --config=pascalVOC_Conv128CosineClassifier
+
+CUDA_VISIBLE_DEVICES=1 python -W ignore train_voc.py --config=pascalVOC_Conv64CosineClassifier
+
+CUDA_VISIBLE_DEVICES=2 python -W ignore train_voc.py --config=pascalVOC_Conv32CosineClassifier
+
+CUDA_VISIBLE_DEVICES=3 python -W ignore train_voc.py --config=pascalVOC_ResNetLikeCosineClassifier
+
+
+
+# With Pascal VOC dataset training command, second step cheatsheet
+
+CUDA_VISIBLE_DEVICES=6 python -W ignore train_voc.py --config=pascalVOC_Conv128CosineClassifierGenWeightAvgN5
+
+CUDA_VISIBLE_DEVICES=7 python -W ignore train_voc.py --config=pascalVOC_Conv64CosineClassifierGenWeightAvgN5
+
+CUDA_VISIBLE_DEVICES=8 python -W ignore train_voc.py --config=pascalVOC_Conv32CosineClassifierGenWeightAvgN5 --num_workers=10
+
+CUDA_VISIBLE_DEVICES=9 python -W ignore train_voc.py --config=pascalVOC_ResNetLikeCosineClassifierGenWeightAvgN5 --num_workers=10
+
