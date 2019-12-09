@@ -1,7 +1,7 @@
 config = {}
 # set the parameters related to the training and testing set
 
-nKbase = 64 
+nKbase = 64
 nKnovel = 5
 nExemplars = 5
 
@@ -10,7 +10,7 @@ data_train_opt['nKnovel'] = nKnovel
 data_train_opt['nKbase'] = -1
 data_train_opt['nExemplars'] = nExemplars
 data_train_opt['nTestNovel'] = nKnovel * 3
-data_train_opt['nTestBase'] = nKnovel * 3 
+data_train_opt['nTestBase'] = nKnovel * 3
 data_train_opt['batch_size'] = 8
 data_train_opt['epoch_size'] = data_train_opt['batch_size'] * 1000
 

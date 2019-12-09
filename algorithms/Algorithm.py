@@ -23,7 +23,7 @@ class Algorithm():
         self.set_experiment_dir(opt['exp_dir'])
         self.set_log_file_handler()
 
-        self.logger.info('Algorithm options %s' % opt)
+        #self.logger.info('Algorithm options %s' % opt)
         self.opt = opt
         self.init_all_networks()
         self.init_all_criterions()
@@ -334,6 +334,41 @@ class Algorithm():
 
         return eval_stats.average()
 
+    def test(self,tloader, tloader_test, tloader_ttrain):
+        self.logger.info('Test: %s' % os.path.basename(self.exp_dir))
+        self.logger.info('==> Dataset: %s' %
+                         (tloader_test.dataset_name))
+
+        for key, network in self.networks.items():
+            network.eval()
+
+        for idxt, test in enumerate(tloader_test()):
+            for idxtr, ttrain in enumerate(tloader_ttrain()):
+                for idxt, t in enumerate(tloader()):
+                    self.test_step(t, test, ttrain)
+
+    def tester(self, tloader_test, tloader_ttrain, image_name):
+        self.logger.info('Test: %s' % os.path.basename(self.exp_dir))
+        self.logger.info('==> Dataset: %s' %
+                         (tloader_test.dataset_name))
+
+        for key, network in self.networks.items():
+            network.eval()
+
+        for idxtr, ttrain in enumerate(tloader_ttrain()):
+            self.logger.info('Start Selective_Search : %s' % image_name.split('/')[-1])
+            for idxt, test in enumerate(tloader_test()):
+                self.logger.info('---> Selective_Search Result : %d' % tloader_test.rect_count)
+                if tloader_test.rect_count == 0:
+                    break;
+                    
+                self.logger.info('Start Recognition')
+                infer_label, smx_list = self.test_step(test, ttrain, tloader_test.rect_count)
+                self.logger.info('---> Finish')
+                self.logger.info('Generate Results')
+                tloader_test.img_show_all(infer_label, smx_list)
+                self.logger.info('---> Save Results(Output, Grandtruth, Text)')
+
     def adjust_learning_rates(self, epoch):
         # filter out the networks that are not trainable and that do
         # not have a learning rate Look Up Table (LUT_lr) in their optim_params
@@ -397,6 +432,9 @@ class Algorithm():
                 metrics for that batch. The key names on the dictionary can be
                 arbitrary.
         """
+        pass
+
+    def test_step(self, batch, tloader_test, tloader_ttrain, rect_count, K):
         pass
 
     def allocate_tensors(self):

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 
 import numpy as np
@@ -52,7 +53,10 @@ class FewShot(Algorithm):
             train_test_stage = 'fewshot'
             assert(len(batch) == 6)
             images_train, labels_train, images_test, labels_test, K, nKbase = batch
-            self.nKbase = nKbase.squeeze()[0]
+            if self.count != 0:
+                self.nKbase = nKbase.squeeze().item()
+            else:
+                self.nKbase = nKbase.squeeze()[0]
             self.tensors['images_train'].resize_(images_train.size()).copy_(images_train)
             self.tensors['labels_train'].resize_(labels_train.size()).copy_(labels_train)
             labels_train = self.tensors['labels_train']
@@ -78,9 +82,11 @@ class FewShot(Algorithm):
         return train_test_stage
 
     def train_step(self, batch):
+        self.count = 0
         return self.process_batch(batch, do_train=True)
 
     def evaluation_step(self, batch):
+        self.count = 1
         return self.process_batch(batch, do_train=False)
 
     def process_batch(self, batch, do_train):
@@ -137,9 +143,9 @@ class FewShot(Algorithm):
         #************************** COMPUTE LOSSES *****************************
         loss_cls_all = criterion(cls_scores_var, labels_test_var)
         loss_total = loss_cls_all
-        loss_record['loss'] = loss_total.data[0]
+        loss_record['loss'] = loss_total.data.item()
         loss_record['AccuracyBase'] = top1accuracy(
-            cls_scores_var.data, labels_test_var.data)
+            cls_scores_var.data, labels_test_var.data).item()
         #***********************************************************************
 
         #***********************************************************************
@@ -182,12 +188,12 @@ class FewShot(Algorithm):
         #***********************************************************************
         #*********************** SET TORCH VARIABLES ***************************
         is_volatile = (not do_train or not do_train_feat_model)
-        images_test_var = Variable(images_test, volatile=is_volatile)
+        images_test_var = Variable(images_test)
         labels_test_var = Variable(labels_test, requires_grad=False)
         Kbase_var = (None if (nKbase==0) else
             Variable(Kids[:,:nKbase].contiguous(),requires_grad=False))
         labels_train_1hot_var = Variable(labels_train_1hot, requires_grad=False)
-        images_train_var = Variable(images_train, volatile=is_volatile)
+        images_train_var = Variable(images_train)
         #***********************************************************************
 
         loss_record = {}
@@ -236,11 +242,11 @@ class FewShot(Algorithm):
         #************************* COMPUTE LOSSES ******************************
         loss_cls_all = criterion(cls_scores_var, labels_test_var)
         loss_total = loss_cls_all
-        loss_record['loss'] = loss_total.data[0]
+        loss_record['loss'] = loss_total.data.item()
 
         if self.nKbase > 0:
             loss_record['AccuracyBoth'] = top1accuracy(
-                cls_scores_var.data, labels_test_var.data)
+                cls_scores_var.data, labels_test_var.data).item()
 
             preds_data = cls_scores_var.data.cpu()
             labels_test_data = labels_test_var.data.cpu()
@@ -250,14 +256,14 @@ class FewShot(Algorithm):
             preds_novel = preds_data[novel_ids,:]
 
             loss_record['AccuracyBase'] = top1accuracy(
-                preds_base[:,:nKbase], labels_test_data[base_ids])
+                preds_base[:,:nKbase], labels_test_data[base_ids]).item()
             loss_record['AccuracyNovel'] = top1accuracy(
-                preds_novel[:,nKbase:], (labels_test_data[novel_ids]-nKbase))
+                preds_novel[:,nKbase:], (labels_test_data[novel_ids]-nKbase)).item()
         else:
             loss_record['AccuracyNovel'] = top1accuracy(
-                cls_scores_var.data, labels_test_var.data)
+                cls_scores_var.data, labels_test_var.data).item()
         #***********************************************************************
-        
+
         #***********************************************************************
         #************************* BACKWARD PHASE ******************************
         if do_train:

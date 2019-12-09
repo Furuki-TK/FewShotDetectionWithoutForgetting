@@ -78,7 +78,7 @@ class AttentionBasedBlock(nn.Module):
         #   [batch_size x num_train_examples x nFeat] * [batch_size x nFeat x nKbase]
         AttentionCoeficients = self.scale_att * torch.bmm(Qe, wkeys)
         AttentionCoeficients = F.softmax(
-            AttentionCoeficients.view(batch_size*num_train_examples, nKbase))
+            AttentionCoeficients.view(batch_size*num_train_examples, nKbase),dim=1)
         AttentionCoeficients = AttentionCoeficients.view(
             batch_size, num_train_examples, nKbase)
 

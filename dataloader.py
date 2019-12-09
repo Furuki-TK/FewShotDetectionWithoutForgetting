@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 
 import os
@@ -8,6 +8,14 @@ import random
 import pickle
 import json
 import math
+import skimage
+import shutil
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import selectivesearch
 
 import torch
 import torch.utils.data as data
@@ -26,9 +34,11 @@ from pdb import set_trace as breakpoint
 
 # Set the appropriate paths of the datasets here.
 _MINI_IMAGENET_DATASET_DIR = './datasets/MiniImagenet'
-_IMAGENET_DATASET_DIR = './datasets/IMAGENET/ILSVRC2012'
-
+_IMAGENET_DATASET_DIR = '../../datasets/Imagenet10k/images'
+_IMAGE_TEST_SET_DIR = './datasets'
+_PASCAL_VOC_DATASET_DIR = './datasets/PascalVOC'
 _IMAGENET_LOWSHOT_BENCHMARK_CATEGORY_SPLITS_PATH = './data/IMAGENET_LOWSHOT_BENCHMARK_CATEGORY_SPLITS.json'
+label_memo = 'id2label.txt'
 
 transformtypedict=dict(
     Brightness=ImageEnhance.Brightness, Contrast=ImageEnhance.Contrast,
@@ -89,6 +99,106 @@ def load_data(file):
     with open(file, 'rb') as fo:
         data = pickle.load(fo)
     return data
+
+
+def Ssearch(image, img_transform):
+
+    # perform selective search
+    img_lbl, regions = selectivesearch.selective_search(
+        image, scale=500, sigma=0.9, min_size=10)
+
+    candidates = set()
+    for r in regions:
+        # excluding same rectangle (with different segments)
+        if r['rect'] in candidates:
+            continue
+        # excluding regions smaller than 200 pixels
+        if r['size'] < 200:
+            continue
+        #
+        # if r['size'] > 5000:
+        #     continue
+        # distorted rects
+
+        x, y, w, h = r['rect']
+
+        if w == 0 or h == 0:
+            continue
+
+        if w / h > 1.2 or h / w > 1.2:
+            continue
+        candidates.add(r['rect'])
+
+    rect_list = []
+    rect_xywh = []
+    rect_count = 0
+    for x, y, w, h in candidates:
+        # trim image and draw
+        img3 = image[y:y+h, x:x+w]
+        img3 = Image.fromarray(img3)
+        img3 = img_transform(img3)
+
+        rect_list.append(img3)
+        rect_xywh.append([x,y,w,h])
+        rect_count += 1
+
+    return rect_list, rect_xywh, rect_count
+
+
+class PascalVOC(data.Dataset):
+    def __init__(self, phase='train'):
+
+        self.base_folder = 'PascalVOC'
+        assert(phase=='train' or phase=='val' or phase=='test')
+        self.phase = phase
+        self.name = 'PascalVOC_' + phase
+        print('Loading PascalVOC dataset - phase {0}'.format(phase))
+
+        base_classes = [0,1,2,3,4,5,6,7,8,9]
+        novel_classes_val_phase = [10,11,12,13,14]
+        novel_classes_test_phase = [15,16,17,18,19]
+
+        transforms_list = []
+        transforms_list.append(transforms.Resize(84))
+        transforms_list.append(transforms.CenterCrop(84))
+        transforms_list.append(lambda x: np.asarray(x))
+        transforms_list.append(transforms.ToTensor())
+        mean_pix = [0.485, 0.456, 0.406]
+        std_pix = [0.229, 0.224, 0.225]
+        transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+        self.transform = transforms.Compose(transforms_list)
+
+        if phase == 'train':
+            dir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'train')
+        elif phase == 'val':
+            dir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'val')
+
+        self.data = datasets.ImageFolder(dir, self.transform)
+        self.labels = [item[1] for item in self.data.imgs]
+
+        self.label2ind = buildLabelIndex(self.labels)
+        self.labelIds = sorted(self.label2ind.keys())
+        self.num_cats = len(self.labelIds)
+        assert(self.num_cats==20)
+
+        self.labelIds_base = base_classes
+        self.num_cats_base = len(self.labelIds_base)
+        if self.phase=='val' or self.phase=='test':
+            self.labelIds_novel = (
+                novel_classes_val_phase if (self.phase=='val') else
+                novel_classes_test_phase)
+            self.num_cats_novel = len(self.labelIds_novel)
+
+            #重複するクラスがないか
+            intersection = set(self.labelIds_base) & set(self.labelIds_novel)
+            assert(len(intersection) == 0)
+
+    def __getitem__(self, index):
+        img, label = self.data[index]
+        return img, label
+
+    def __len__(self):
+        return len(self.data)
 
 
 class MiniImageNet(data.Dataset):
@@ -189,6 +299,285 @@ class MiniImageNet(data.Dataset):
         if self.transform is not None:
             img = self.transform(img)
         return img, label
+
+    def __len__(self):
+        return len(self.data)
+
+
+class ImageNetTrainSet(data.Dataset):
+    def __init__(self,
+                 phase='train',
+                 category=5, # number of novel categories.
+                 dpc=2,
+                 nExemplars=-1, # number of training examples per novel category.
+                 ):
+        self.phase = phase
+        self.category = category
+        self.dpc = dpc
+        #assert(split=='train' or split=='val')
+        self.name = 'ImageNet_Phase_' + phase
+        self.dataset_name = 'few_shot_detection'
+
+        print('Loading traindata')
+        transforms_list = []
+        transforms_list.append(transforms.Resize(84))
+        transforms_list.append(transforms.CenterCrop(84))
+        transforms_list.append(lambda x: np.asarray(x))
+        transforms_list.append(transforms.ToTensor())
+        mean_pix = [0.485, 0.456, 0.406]
+        std_pix = [0.229, 0.224, 0.225]
+        transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+        self.transform = transforms.Compose(transforms_list)
+
+        if phase=='test':
+            tdir = os.path.join(_IMAGE_TEST_SET_DIR, 'test')
+        else:
+            tdir = os.path.join(_IMAGE_TEST_SET_DIR, 'train_exp')
+        self.data = datasets.ImageFolder(tdir, self.transform)
+        self.labels = [item[1] for item in self.data.imgs]
+
+    def __call__(self, index=0):
+        # img, label = self.data[index]
+        def load_function(iter_idx):
+            img_count = [0] * self.category
+            img_list = []
+            label_list = []
+            buf_img=[]
+            buf_label = []
+            data_num = len(self.data)
+            for index in range(data_num):
+                buf_img, buf_label = self.data[index]
+                if buf_label < self.category:
+                    if img_count[buf_label] < self.dpc:
+                        img_list.append(buf_img)
+                        label_list.append(buf_label + 64)
+                        img_count[buf_label] += 1
+
+            images = torch.stack(
+                [img_list[img_idx] for img_idx in range(sum(img_count))], dim=0)
+            labels = torch.LongTensor([label for label in label_list])
+
+            return images, labels
+
+        tnt_dataset = tnt.dataset.ListDataset(
+            elem_list=range(1), load=load_function)
+        data_loader = tnt_dataset.parallel(
+            batch_size=1,
+            num_workers=0,
+            shuffle=False)
+
+        return data_loader
+
+    def __len__(self):
+        return len(self.data)
+
+
+class VOCTrainSet(data.Dataset):
+    def __init__(self,
+                 phase='train',
+                 category=5, # number of novel categories.
+                 nExemplars=5, # number of training examples per novel category.
+                 ):
+
+        random.seed(1)
+        self.phase = phase
+        self.category = category
+        self.nExemplars = nExemplars
+        #assert(split=='train' or split=='val')
+        self.name = 'VOC_Phase_' + phase
+        self.dataset_name = 'few_shot_detection'
+
+        base_classes = [0,1,2,3,4,5,6,7,8,9]
+        novel_classes_val_phase = [10,11,12,13,14]
+        novel_classes_test_phase = [15,16,17,18,19]
+
+        print('Loading traindata')
+        transforms_list = []
+        transforms_list.append(transforms.Resize(84))
+        transforms_list.append(transforms.CenterCrop(84))
+        transforms_list.append(lambda x: np.asarray(x))
+        transforms_list.append(transforms.ToTensor())
+        mean_pix = [0.485, 0.456, 0.406]
+        std_pix = [0.229, 0.224, 0.225]
+        transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+        self.transform = transforms.Compose(transforms_list)
+
+        if phase=='test':
+            tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'test')
+        else:
+            tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'test')
+        self.data = datasets.ImageFolder(tdir, self.transform)
+        self.labels = [item[1] for item in self.data.imgs]
+
+        self.label2ind = buildLabelIndex(self.labels)
+        self.labelIds = sorted(self.label2ind.keys())
+        self.num_cats = len(self.labelIds)
+        assert(self.num_cats==20)
+
+        self.labelIds_base = base_classes
+        self.num_cats_base = len(self.labelIds_base)
+
+        self.labelIds_novel = sorted(random.sample(novel_classes_val_phase, k=self.category))
+        self.labelIds_novel = novel_classes_val_phase + novel_classes_test_phase
+        self.num_cats_novel = len(self.labelIds_novel)
+
+        #重複するクラスがないか
+        intersection = set(self.labelIds_base) & set(self.labelIds_novel)
+        assert(len(intersection) == 0)
+
+
+    def __call__(self, index=0):
+
+        def load_function(iter_idx):
+            img_count = [0] * self.num_cats
+            img_list = []
+            label_list = []
+
+            for novel_label in self.labelIds_novel:
+                buf = random.sample(self.label2ind[novel_label],k=self.nExemplars)
+                for image_id in buf:
+                    if img_count[novel_label] < self.nExemplars:
+                        buf_img, _ = self.data[image_id]
+                        img_list.append(buf_img)
+                        label_list.append(novel_label)
+                        img_count[novel_label] += 1
+
+
+            images = torch.stack(
+                [img_list[img_idx] for img_idx in range(sum(img_count))], dim=0)
+            labels = torch.LongTensor([label for label in label_list])
+
+            return images, labels
+
+        tnt_dataset = tnt.dataset.ListDataset(
+            elem_list=range(1), load=load_function)
+        data_loader = tnt_dataset.parallel(
+            batch_size=1,
+            num_workers=0,
+            shuffle=False)
+
+        return data_loader
+
+    def __len__(self):
+        return len(self.data)
+
+
+class OriginalTestSet(data.Dataset):
+    def __init__(self,
+                data):
+
+        # loading image
+        self.data_name = data.split('/')[-1].split('.')[0]
+        self.data = np.array(Image.open(data))
+        assert(self.data.all() != None)
+
+        self.name = 'Selective Search'
+        self.dataset_name = 'few_shot_detection'
+
+        print('Loading data - phase {0}'.format(self.name))
+
+        transforms_list = []
+        transforms_list.append(transforms.Resize(84))
+        transforms_list.append(transforms.CenterCrop(84))
+        transforms_list.append(lambda x: np.asarray(x))
+        transforms_list.append(transforms.ToTensor())
+        mean_pix = [0.485, 0.456, 0.406]
+        std_pix = [0.229, 0.224, 0.225]
+        transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+        self.transform = transforms.Compose(transforms_list)
+
+        f = open(label_memo,'r')
+
+        buf = f.read().split()
+
+        self.id2label = {}
+        for n in buf:
+            id,label_name = n.split(',')
+            self.id2label[int(id)] = label_name
+
+        f.close()
+
+    def img_show_all(self, infer_label, smx_list):
+
+        thres = 30.0
+        NN = '_30%_c20_1-20'
+        output_img_dir = '/home/output/images'+ NN
+        output_txt_dir = '/home/output/txt' + NN
+        if not os.path.exists(output_img_dir):
+            os.mkdir(output_img_dir)
+
+        if not os.path.exists(output_txt_dir):
+            os.mkdir(output_txt_dir)
+
+        # # すべての枠に対する識別結果を出力
+        # output_name = '/home/output/images'+ NN+ '/' + self.data_name +'_Zall.png'
+        #
+        # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+        # ax.imshow(self.data)
+        #
+        # for [x, y, w, h], label, prob in zip(self.rect_xywh, infer_label, smx_list):
+        #
+        #     rect = mpatches.Rectangle(
+        #         (x, y), w, h, fill=False, edgecolor='red', linewidth=1)
+        #     #plt.text(x, y+1 ,"label:"+self.id2label[label]+", acc:"+ str(prob), fontsize=15)
+        #     ax.add_patch(rect)
+        #
+        # plt.savefig(output_name)
+        # plt.close()
+
+        # 枠の重なりを最適化して減らした結果を出力
+        output_name = '/home/output/images' + NN+ '/' + self.data_name + '.png'
+        output_txt_name = '/home/output/txt' + NN+ '/' + self.data_name + '.txt'
+
+        ff = open(output_txt_name, 'w')
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+        ax.imshow(self.data)
+
+        rect_xywh_over = []
+        label_over = []
+        prob_over = []
+        for [x, y, w, h], label, prob in zip(self.rect_xywh, infer_label, smx_list):
+            if prob > thres:
+                prob_over.append(prob)
+                label_over.append(label)
+                rect_xywh_over.append([x, y, w, h])
+
+        for [x, y, w, h], label, prob in zip(rect_xywh_over, label_over, prob_over):
+
+            rect = mpatches.Rectangle(
+                (x, y), w, h, alpha=0.2, facecolor='red', edgecolor='red', linewidth=1)
+            plt.text(x, y+1 ,"label:"+self.id2label[label]+", acc:"+ str(prob), fontsize=15)
+            ax.add_patch(rect)
+            txt = self.id2label[label] + " " + str(prob) + " " + str(x) + " " + str(y) + " " + str(x+w) + " " + str (y+h) + "\n"
+            ff.write(txt)
+
+        plt.savefig(output_name)
+        plt.close()
+        ff.close()
+
+        # 正解データのコピー
+        # shutil.copy2('./datasets/VOCDetection/grandtruth/'+ self.data_name + '.jpg', './output/images/'+ self.data_name + '_grandtruth.jpg')
+
+    def __call__(self, index=0):
+        self.rect_list, self.rect_xywh, self.rect_count = Ssearch(self.data, self.transform)
+        def load_function(iter_idx):
+            images = torch.stack(
+                [self.rect_list[img_idx] for img_idx in range(self.rect_count)], dim=0)
+            labels = torch.LongTensor([64 for label in range(self.rect_count)])
+
+            return images, labels
+
+        if self.rect_count > 0:
+            tnt_dataset = tnt.dataset.ListDataset(
+                elem_list=range(1), load=load_function)
+            data_loader = tnt_dataset.parallel(
+                batch_size=1,
+                num_workers=0,
+                shuffle=False)
+        else:
+            data_loader = ["a","aa"]
+
+        return data_loader
 
     def __len__(self):
         return len(self.data)
