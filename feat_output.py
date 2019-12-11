@@ -28,7 +28,7 @@ class ConvBlock(nn.Module):
         super(ConvBlock, self).__init__()
         self.layers = nn.Sequential()
         self.layers.add_module('Conv', nn.Conv2d(in_planes, out_planes,
-            kernel_size=1, stride=1, padding=1, bias=False))
+            kernel_size=3, stride=1, padding=1, bias=False))
         self.layers.add_module('BatchNorm', nn.BatchNorm2d(out_planes))
 
         if userelu:

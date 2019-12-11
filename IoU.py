@@ -15,6 +15,7 @@ parser.add_argument(
     default=os.path.join(currentPath, 'groundtruths'),
     metavar='',
     help='folder containing your ground truth bounding boxes')
+
 parser.add_argument(
     '-det',
     '--detfolder',
@@ -23,11 +24,19 @@ parser.add_argument(
     metavar='',
     help='folder containing your detected bounding boxes')
 
+parser.add_argument(
+    '-ch',
+    dest='ch',
+    default=0,
+    help='ch name (ex.) -ch 0')
+
 args = parser.parse_args()
 
 _path = os.getcwd()
 
-os.chdir(args.detFolder)
+derfolder = args.detFolder + str(args.ch)
+ch_name = derfolder.split("/")[-1].split("_")[-1]
+os.chdir(derfolder)
 files = glob.glob("*.txt")
 files.sort()
 os.chdir(_path)
@@ -46,7 +55,7 @@ his = []
 for f in files:
     nameOfImage = f.replace(".txt", "")
     gt_path = os.path.join(args.gtFolder,f)
-    det_path = os.path.join(args.detFolder,f)
+    det_path = os.path.join(derfolder,f)
     gt1 = open(gt_path, "r")
     fh1 = open(det_path, "r")
     fh_all_splitLine = []
@@ -107,7 +116,8 @@ print(IoU_count)
 # x = [j*0.1 for j in range(10)]
 fig = plt.figure()
 ax = fig.add_subplot(1,1,1)
-ax.hist(his, normed = True)
+ax.hist(his, density = True)
 ax.set_xlabel('IoU')
 ax.set_ylabel('( num of bbox / all bbox ) * 10')
-fig.savefig('./output_hist_ch_0.png')
+ax.set_ylim([0.0, 1.4])
+fig.savefig('./IoU_result/output_hist_ch_'+ ch_name + '.png')
