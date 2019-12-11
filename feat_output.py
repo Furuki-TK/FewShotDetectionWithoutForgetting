@@ -2,27 +2,33 @@ from __future__ import print_function
 import argparse
 import os
 import imp
+import cv2
+import numpy as np
 import math
+import glob
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms as transforms
+
+from PIL import Image
 
 # from dataloader import MiniImageNet, FewShotDataloader
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--config', type=str, required=True, default='',
-    help='config file with parameters of the experiment. It is assumed that all'
-         ' the config file is placed on  ')
-
-args_opt = parser.parse_args()
+#
+# parser = argparse.ArgumentParser()
+#
+# parser.add_argument('--config', type=str, required=True, default='',
+#     help='config file with parameters of the experiment. It is assumed that all'
+#          ' the config file is placed on  ')
+#
+# args_opt = parser.parse_args()
 
 class ConvBlock(nn.Module):
     def __init__(self, in_planes, out_planes, userelu=True):
         super(ConvBlock, self).__init__()
         self.layers = nn.Sequential()
         self.layers.add_module('Conv', nn.Conv2d(in_planes, out_planes,
-            kernel_size=3, stride=1, padding=1, bias=False))
+            kernel_size=1, stride=1, padding=1, bias=False))
         self.layers.add_module('BatchNorm', nn.BatchNorm2d(out_planes))
 
         if userelu:
@@ -80,13 +86,14 @@ def create_model(opt):
     return ConvNet(opt)
 
 # exp_directory = os.path.join('.', 'experiments', args_opt.config)
-pretrained_path = './experiments/miniImageNet_Conv128CosineClassifier/feat_model_net_epoch*.best'
-feat_model_opt = {'userelu': False, 'in_planes':3, 'out_planes':[64,64,128,128], 'num_stages':4}
+# pretrained_path = '/home/experiments/pascalVOC_Conv128CosineClassifier/feat_model_net_epoch11.best'
+pretrained_path = None
+feat_model_opt = {'userelu': False, 'in_planes':3, 'out_planes':[10,10,128,128], 'num_stages':4}
 
 def init_network():
 
     network = create_model(feat_model_opt)
-    if pretrained_path == None:
+    if pretrained_path != None:
         load_pretrained(network, pretrained_path)
 
     return network
@@ -113,20 +120,40 @@ def load_pretrained(network, pretrained_path):
 
 if __name__ == '__main__':
     feat_model = init_network()
-    input = torch.randn(1, 3, 84, 84)
+
+    data = './datasets/VOCDetection/trainvalset_ID_15-19_images/2008_000093.jpg'
+
+    transforms_list = []
+    transforms_list.append(transforms.Resize(84))
+    transforms_list.append(transforms.CenterCrop(84))
+    transforms_list.append(lambda x: np.asarray(x))
+    transforms_list.append(transforms.ToTensor())
+    mean_pix = [0.485, 0.456, 0.406]
+    std_pix = [0.229, 0.224, 0.225]
+    transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+    img_transform = transforms.Compose(transforms_list)
+
+    input = np.array(Image.open(data))
+    input = Image.fromarray(input)
+    input = img_transform(input)
+    input = input[np.newaxis,:,:,:]
+
+    # input = torch.randn(1, 3, 84, 84)
     out = feat_model(input)
 
     count = 0
     for x in out:
         count += 1
         xx = np.squeeze(x.data.cpu().numpy())
-        for i in range(len(xx[0])):
-            mask = cv2.resize(xx[0][i], 84)
+        print(len(xx[0]))
+        for i in range(len(xx)):
+            mask = cv2.resize(xx[i], (84,84))
             mask = mask - np.min(mask)
 
             if np.max(mask) != 0:
                 mask = mask / np.max(mask)
 
             feature_map = np.float32(cv2.applyColorMap(np.uint8(255 * mask), cv2.COLORMAP_JET))
-            output_name = 'feature_Conv'+str(count) + '_' +str(i) +'.png'
+            # feature_map = np.float32(np.uint8(255 * mask))
+            output_name = 'output/feat_result/feature_Conv'+str(count) + '_' +str(i) +'.png'
             cv2.imwrite(output_name,feature_map)

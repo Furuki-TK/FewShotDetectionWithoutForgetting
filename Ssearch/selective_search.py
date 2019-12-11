@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 
 import os
+import cv2
 import argparse
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -50,22 +51,22 @@ def SS(data):
 
     output_txt_name = '/home/output/txt_SS/' + data_name + '.txt'
 
-    ff = open(output_txt_name, 'w')
+    # ff = open(output_txt_name, 'w')
 
-    # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
-    # ax.imshow(img)
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+    ax.imshow(img)
     for x, y, w, h in candidates:
-        # print(x,y,w,h)
+        print(x,y,w,h)
         # draw rectangles on the original image
-        # rect = mpatches.Rectangle(
-        #     (x, y), w, h, fill=False, edgecolor='red', linewidth=1)
-        # ax.add_patch(rect)
-        txt = str(x) + " " + str(y) + " " + str(x+w) + " " + str (y+h) + "\n"
-        ff.write(txt)
+        rect = mpatches.Rectangle(
+            (x, y), w, h, fill=False, edgecolor='red', linewidth=1)
+        ax.add_patch(rect)
+        # txt = str(x) + " " + str(y) + " " + str(x+w) + " " + str (y+h) + "\n"
+        # ff.write(txt)
 
-    ff.close()
-    # output = 'output/SS/' + data.split('/')[-1]
-    # plt.savefig(output)
+    # ff.close()
+    output = '/home/output/SS_feat/' + data.split('/')[-1]
+    plt.savefig(output)
 
 
     # image_number = 0
@@ -96,7 +97,13 @@ if __name__ == "__main__":
     args_opt = arg_parse()
     # loading image
     image_txt = args_opt.input
-    # dataset_path = 'datasets/VOCDetection/test'
+
+    SS(image_txt)
+
+
+    # # dataset_path = 'datasets/VOCDetection/test'
+    #
+    # dataset_path = '../datasets/VOCDetection/all_images/JPEGImages'
     # f = open(image_txt, 'r')
     #
     # file_list = []
@@ -104,16 +111,7 @@ if __name__ == "__main__":
     #     file_list.append(os.path.join(dataset_path,s.replace('\n','')))
     #
     # f.close()
-
-    dataset_path = '../datasets/VOCDetection/all_images/JPEGImages'
-    f = open(image_txt, 'r')
-
-    file_list = []
-    for s in f:
-        file_list.append(os.path.join(dataset_path,s.replace('\n','')))
-
-    f.close()
-    # test1=file_list[:500]
-
-    for image_name in file_list:
-        SS(image_name)
+    # # test1=file_list[:500]
+    #
+    # for image_name in file_list:
+    #     SS(image_name)
