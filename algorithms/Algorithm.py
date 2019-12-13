@@ -361,13 +361,34 @@ class Algorithm():
                 self.logger.info('---> Selective_Search Result : %d' % tloader_test.rect_count)
                 if tloader_test.rect_count == 0:
                     break;
-                    
+
                 self.logger.info('Start Recognition')
                 infer_label, smx_list = self.test_step(test, ttrain, tloader_test.rect_count)
                 self.logger.info('---> Finish')
                 self.logger.info('Generate Results')
                 tloader_test.img_show_all(infer_label, smx_list)
                 self.logger.info('---> Save Results(Output, Grandtruth, Text)')
+
+    def SS_classifer_opt(self, data_query, image_name):
+        self.logger.info('model: %s' % os.path.basename(self.exp_dir))
+        self.logger.info('==> Dataset: %s' % data_query.dataset_name)
+
+        for key, network in self.networks.items():
+            network.eval()
+
+        self.logger.info('Start Selective_Search : %s' % image_name.split('/')[-1])
+        for idxt, query_rect in enumerate(data_query()):
+            self.logger.info('---> Selective_Search Result : %d' % data_query.rect_count)
+            # Selective Searchの結果が０なら終了
+            if data_query.rect_count == 0:
+                break;
+
+            self.logger.info('Start Recognition')
+            infer_label, smx_list = self.classifer_step(query_rect, data_query.rect_count)
+            self.logger.info('---> Finish')
+            self.logger.info('Generate Results')
+            data_query.img_show_all(infer_label, smx_list)
+            self.logger.info('---> Save Results(Output, Grandtruth, Text)')
 
     def adjust_learning_rates(self, epoch):
         # filter out the networks that are not trainable and that do
@@ -435,6 +456,12 @@ class Algorithm():
         pass
 
     def test_step(self, batch, tloader_test, tloader_ttrain, rect_count, K):
+        pass
+
+    def entry_step(self, data_query, rect_count):
+        pass
+
+    def classifer_step(self, data_query, rect_count):
         pass
 
     def allocate_tensors(self):

@@ -472,7 +472,7 @@ class OriginalTestSet(data.Dataset):
         assert(self.data.all() != None)
 
         self.name = 'Selective Search'
-        self.dataset_name = 'few_shot_detection'
+        self.dataset_name = 'VOC'
 
         print('Loading data - phase {0}'.format(self.name))
 
@@ -500,7 +500,7 @@ class OriginalTestSet(data.Dataset):
     def img_show_all(self, infer_label, smx_list):
 
         thres = 30.0
-        NN = '_30%_c20_1-20'
+        NN = '_30%_c20_test'
         output_img_dir = '/home/output/images'+ NN
         output_txt_dir = '/home/output/txt' + NN
         if not os.path.exists(output_img_dir):
@@ -525,9 +525,8 @@ class OriginalTestSet(data.Dataset):
         # plt.savefig(output_name)
         # plt.close()
 
-        # 枠の重なりを最適化して減らした結果を出力
-        output_name = '/home/output/images' + NN+ '/' + self.data_name + '.png'
-        output_txt_name = '/home/output/txt' + NN+ '/' + self.data_name + '.txt'
+        output_name = output_img_dir + '/' + self.data_name + '.png'
+        output_txt_name = output_txt_dir + '/' + self.data_name + '.txt'
 
         ff = open(output_txt_name, 'w')
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
