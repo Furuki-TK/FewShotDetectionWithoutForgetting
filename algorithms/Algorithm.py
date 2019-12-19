@@ -1,4 +1,5 @@
 """Define a generic class for training and testing learning algorithms."""
+# -*- coding: utf-8 -*-
 from __future__ import print_function
 import os
 import os.path
@@ -15,11 +16,17 @@ import utils
 import datetime
 import logging
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
 from pdb import set_trace as breakpoint
 
 
 class Algorithm():
     def __init__(self, opt):
+        self.model_dir = opt['model_dir']
         self.set_experiment_dir(opt['exp_dir'])
         self.set_log_file_handler()
 
@@ -257,10 +264,10 @@ class Algorithm():
             self.optimizers[net_key].load_state_dict(checkpoint['optimizer'])
 
     def _get_net_checkpoint_filename(self, net_key, epoch):
-        return os.path.join(self.exp_dir, net_key+'_net_epoch'+str(epoch))
+        return os.path.join(self.model_dir, net_key+'_net_epoch'+str(epoch))
 
     def _get_optim_checkpoint_filename(self, net_key, epoch):
-        return os.path.join(self.exp_dir, net_key+'_optim_epoch'+str(epoch))
+        return os.path.join(self.model_dir, net_key+'_optim_epoch'+str(epoch))
 
     def solve(self, data_loader_train, data_loader_test=None):
         self.max_num_epochs = self.opt['max_num_epochs']
@@ -369,26 +376,63 @@ class Algorithm():
                 tloader_test.img_show_all(infer_label, smx_list)
                 self.logger.info('---> Save Results(Output, Grandtruth, Text)')
 
-    def SS_classifer_opt(self, data_query, image_name):
+    def entry(self, data_support):
         self.logger.info('model: %s' % os.path.basename(self.exp_dir))
-        self.logger.info('==> Dataset: %s' % data_query.dataset_name)
+        self.logger.info('==> Dataset: %s' % data_support.dataset_name)
+        self.id2label = data_support.id2label
 
         for key, network in self.networks.items():
             network.eval()
 
-        self.logger.info('Start Selective_Search : %s' % image_name.split('/')[-1])
-        for idxt, query_rect in enumerate(data_query()):
+        for idxtr, support in enumerate(data_support()):
+            self.entry_step(support)
+
+    def SS_classifer_opt(self, data_query):
+        for key, network in self.networks.items():
+            network.eval()
+
+        self.logger.info('Query : %s' % data_query.data_name)
+        for idxt, query in enumerate(data_query()):
             self.logger.info('---> Selective_Search Result : %d' % data_query.rect_count)
-            # Selective Searchの結果が０なら終了
+            # Selective Search result = 0 is skip
             if data_query.rect_count == 0:
                 break;
 
-            self.logger.info('Start Recognition')
-            infer_label, smx_list = self.classifer_step(query_rect, data_query.rect_count)
-            self.logger.info('---> Finish')
-            self.logger.info('Generate Results')
-            data_query.img_show_all(infer_label, smx_list)
-            self.logger.info('---> Save Results(Output, Grandtruth, Text)')
+            infer_label, smx_list = self.classifer_step(query, data_query)
+            self.logger.info('---> Finish Detection')
+            self.output_result(data_query, infer_label, smx_list)
+            self.logger.info('---> Save Results')
+
+    def output_result(self, data_query, infer_label, smx_list):
+
+        output_name = self.opt['img_dir'] + '/' + data_query.data_name + '.png'
+        output_txt_name = self.opt['txt_dir'] + '/' + data_query.data_name + '.txt'
+
+        ff = open(output_txt_name, 'w')
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+        ax.imshow(data_query.data)
+
+        rect_xywh_over = []
+        label_over = []
+        prob_over = []
+        for [x, y, w, h], label, prob in zip(data_query.rect_xywh, infer_label, smx_list):
+            if prob > self.opt['thres']:
+                prob_over.append(prob)
+                label_over.append(label)
+                rect_xywh_over.append([x, y, w, h])
+
+        for [x, y, w, h], label, prob in zip(rect_xywh_over, label_over, prob_over):
+
+            rect = mpatches.Rectangle(
+                (x, y), w, h, alpha=0.2, facecolor='red', edgecolor='red', linewidth=1)
+            plt.text(x, y+1 ,"label:"+self.id2label[label]+", acc:"+ str(prob), fontsize=15)
+            ax.add_patch(rect)
+            txt = self.id2label[label] + " " + str(prob) + " " + str(x) + " " + str(y) + " " + str(x+w) + " " + str (y+h) + "\n"
+            ff.write(txt)
+
+        plt.savefig(output_name)
+        plt.close()
+        ff.close()
 
     def adjust_learning_rates(self, epoch):
         # filter out the networks that are not trainable and that do
@@ -458,7 +502,7 @@ class Algorithm():
     def test_step(self, batch, tloader_test, tloader_ttrain, rect_count, K):
         pass
 
-    def entry_step(self, data_query, rect_count):
+    def entry_step(self, data_query):
         pass
 
     def classifer_step(self, data_query, rect_count):

@@ -7,28 +7,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import utils
+import scipy.optimize as optimize
 
 from pdb import set_trace as breakpoint
 import time
 from tqdm import tqdm
+from PIL import Image
 
 from . import Algorithm
-
-
-def top1accuracy(output, target):
-    _, pred = output.max(dim=1)
-    pred = pred.view(-1)
-    target = target.view(-1)
-    accuracy = 100 * pred.eq(target).float().mean()
-    return accuracy
-
-
-
-def activate_dropout_units(model):
-    for m in model.modules():
-        if isinstance(m, nn.Dropout):
-            m.training = True
-
 
 
 class FewShotClassification(Algorithm):
@@ -39,7 +25,6 @@ class FewShotClassification(Algorithm):
             opt['activate_dropout'] if ('activate_dropout' in opt) else False)
         self.keep_best_model_metric_name = 'AccuracyNovel'
         self.count = 0
-
 
     def allocate_tensors(self):
         self.tensors = {}
@@ -71,9 +56,8 @@ class FewShotClassification(Algorithm):
             self.tensors['Kids'].resize_(K.size()).copy_(K)
 
         elif process_type == 'classifer':
-            images_test, labels_test = data
-            self.tensors['images_test'].resize_(images_test.size()).copy_(images_test)
-            self.tensors['labels_test'].resize_(labels_test.size()).copy_(labels_test)
+            self.tensors['images_test'].resize_((1,1,3,84,84))
+
 
         else:
             raise ValueError('Unexpected process type {0}'.format(process_type))
@@ -82,15 +66,9 @@ class FewShotClassification(Algorithm):
     def entry_step(self, data_support):
         process_type = 'entry'
         self.set_tensors(process_type, data_support)
-        self.process_entry()
+        self.process_entry(data_support)
 
-    def classifer_step(self, data_query, rect_count):
-        process_type = 'classifer'
-        self.rect_count = rect_count
-        self.set_tensors(process_type, data_query)
-        infer_label, smx_list = self.process_fewshot_without_forgetting()
 
-        return infer_label, smx_list
 
     def process_entry(self, data_support):
         images_train = self.tensors['images_train']
@@ -126,15 +104,71 @@ class FewShotClassification(Algorithm):
             features_train=features_train_var,
             labels_train=labels_train_1hot_var)
 
-    def process_fewshot_without_forgetting(self):
-        images_test = self.tensors['images_test']
-        labels_test = self.tensors['labels_test']
+    def process_classifer(self, param):
+        x, y, w, h = map(int, param)
+
+        w_max = len(self.data_query.data[0])
+        h_max = len(self.data_query.data)
+        if x > w_max:
+            x = w_max - w
+        if x < 0:
+            x = 0
+        if x+w > w_max:
+            w = w_max - x
+        if x+w < 0:
+            w = 0 - x
+        if y > h_max:
+            y = h_max - h
+        if y < 0:
+            y = 0
+        if y+h > h_max:
+            h = h_max - y
+        if y+h < 0:
+            h = 0 - y
+        if w == 0:
+            if x == w_max:
+                x = w_max - 1
+                w = 1
+            else:
+                w = 1
+        if h == 0:
+            if y == h_max:
+                y = h_max - 1
+                h = 1
+            else:
+                h = 1
+                
+        test_data = self.data_query.data[y:y+h, x:x+w]
+        test_data = Image.fromarray(test_data)
+        test_data = self.data_query.transform(test_data)
+        test_data = torch.stack([test_data], dim=0)
+        test_data = torch.stack([test_data], dim=0)
+
+        return self.process_fewshot_classifer_without_forgetting(test_data)
+
+    def classifer_step(self, query, data_query):
+        process_type = 'classifer'
+        self.data_query = data_query
+        self.rect_count = data_query.rect_count
+        self.set_tensors(process_type, query)
+        smx_list = []
+        infer_label = []
+        for i in tqdm(range(self.rect_count)):
+            param = self.data_query.rect_xywh[i]
+            results = optimize.minimize(self.process_classifer, x0=param, method='Nelder-Mead')
+            self.data_query.rect_xywh[i] = map(int,results.x)
+            smx_list.append(self.infer_prob)
+            infer_label.append(self.infer_label)
+
+        return infer_label, smx_list
+
+    def process_fewshot_classifer_without_forgetting(self, query):
+        images_test = self.tensors['images_test'].copy_(query)
 
         self.feat_model.eval()
 
         #*********************** SET TORCH VARIABLES ***************************
         images_test_var = Variable(images_test)
-        labels_test_var = Variable(labels_test, requires_grad=False)
 
         #************************* FORWARD PHASE: ******************************
         #************ EXTRACT FEATURES FROM TRAIN & TEST IMAGES ****************
@@ -151,18 +185,10 @@ class FewShotClassification(Algorithm):
         #************************ APPLY CLASSIFIER *****************************
         cls_scores_var = self.classifier(
             features_test=features_test_var)
+        cls_scores_var = cls_scores_var.view(batch_size * num_test_examples, -1)
 
-        cls_scores_var = cls_scores_var.view(batch_size * num_test_examples, -1) #(10,66)
-        infer_label_prob, infer_label = cls_scores_var.data.max(dim=1)
+        smx = F.softmax(cls_scores_var.data, dim=1).cpu().numpy()
+        self.infer_prob = smx.max()*100
+        self.infer_label = smx.argmax()
 
-        smx_list = []
-
-        for i in range(self.rect_count):
-            smx = F.softmax(cls_scores_var.data[i],dim=0).cpu().numpy()
-            np.set_printoptions(suppress=True, precision=3)
-            smx_max = smx.max()
-            smx_list.append(smx_max*100)
-
-        infer_label = infer_label.cpu().numpy()
-
-        return infer_label, smx_list
+        return 1.0/self.infer_prob*100

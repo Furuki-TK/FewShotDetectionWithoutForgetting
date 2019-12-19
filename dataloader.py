@@ -36,7 +36,7 @@ from pdb import set_trace as breakpoint
 _MINI_IMAGENET_DATASET_DIR = './datasets/MiniImagenet'
 _IMAGENET_DATASET_DIR = '../../datasets/Imagenet10k/images'
 _IMAGE_TEST_SET_DIR = './datasets'
-_PASCAL_VOC_DATASET_DIR = './datasets/PascalVOC'
+_PASCAL_VOC_DATASET_DIR = './datasets/VOCclassification/all'
 _IMAGENET_LOWSHOT_BENCHMARK_CATEGORY_SPLITS_PATH = './data/IMAGENET_LOWSHOT_BENCHMARK_CATEGORY_SPLITS.json'
 label_memo = 'id2label.txt'
 
@@ -385,13 +385,12 @@ class VOCTrainSet(data.Dataset):
         self.nExemplars = nExemplars
         #assert(split=='train' or split=='val')
         self.name = 'VOC_Phase_' + phase
-        self.dataset_name = 'few_shot_detection'
+        self.dataset_name = 'VOC_crop'
 
         base_classes = [0,1,2,3,4,5,6,7,8,9]
         novel_classes_val_phase = [10,11,12,13,14]
         novel_classes_test_phase = [15,16,17,18,19]
 
-        print('Loading traindata')
         transforms_list = []
         transforms_list.append(transforms.Resize(84))
         transforms_list.append(transforms.CenterCrop(84))
@@ -402,10 +401,7 @@ class VOCTrainSet(data.Dataset):
         transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
         self.transform = transforms.Compose(transforms_list)
 
-        if phase=='test':
-            tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'test')
-        else:
-            tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'test')
+        tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'test')
         self.data = datasets.ImageFolder(tdir, self.transform)
         self.labels = [item[1] for item in self.data.imgs]
 
@@ -425,6 +421,14 @@ class VOCTrainSet(data.Dataset):
         intersection = set(self.labelIds_base) & set(self.labelIds_novel)
         assert(len(intersection) == 0)
 
+        f = open(label_memo,'r')
+        buf = f.read().split()
+        self.id2label = {}
+        for n in buf:
+            id,label_name = n.split(',')
+            self.id2label[int(id)] = label_name
+
+        f.close()
 
     def __call__(self, index=0):
 
@@ -441,7 +445,6 @@ class VOCTrainSet(data.Dataset):
                         img_list.append(buf_img)
                         label_list.append(novel_label)
                         img_count[novel_label] += 1
-
 
             images = torch.stack(
                 [img_list[img_idx] for img_idx in range(sum(img_count))], dim=0)
@@ -462,19 +465,15 @@ class VOCTrainSet(data.Dataset):
         return len(self.data)
 
 
-class OriginalTestSet(data.Dataset):
+class QuaryData(data.Dataset):
     def __init__(self,
-                data):
+                image_path):
 
-        # loading image
-        self.data_name = data.split('/')[-1].split('.')[0]
-        self.data = np.array(Image.open(data))
+        self.data_name = image_path.split('/')[-1].split('.')[0]
+        self.data = np.array(Image.open(image_path))
         assert(self.data.all() != None)
 
-        self.name = 'Selective Search'
         self.dataset_name = 'VOC'
-
-        print('Loading data - phase {0}'.format(self.name))
 
         transforms_list = []
         transforms_list.append(transforms.Resize(84))
@@ -486,82 +485,10 @@ class OriginalTestSet(data.Dataset):
         transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
         self.transform = transforms.Compose(transforms_list)
 
-        f = open(label_memo,'r')
-
-        buf = f.read().split()
-
-        self.id2label = {}
-        for n in buf:
-            id,label_name = n.split(',')
-            self.id2label[int(id)] = label_name
-
-        f.close()
-
-    def img_show_all(self, infer_label, smx_list):
-
-        thres = 30.0
-        NN = '_30%_c20_test'
-        output_img_dir = '/home/output/images'+ NN
-        output_txt_dir = '/home/output/txt' + NN
-        if not os.path.exists(output_img_dir):
-            os.mkdir(output_img_dir)
-
-        if not os.path.exists(output_txt_dir):
-            os.mkdir(output_txt_dir)
-
-        # # すべての枠に対する識別結果を出力
-        # output_name = '/home/output/images'+ NN+ '/' + self.data_name +'_Zall.png'
-        #
-        # fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
-        # ax.imshow(self.data)
-        #
-        # for [x, y, w, h], label, prob in zip(self.rect_xywh, infer_label, smx_list):
-        #
-        #     rect = mpatches.Rectangle(
-        #         (x, y), w, h, fill=False, edgecolor='red', linewidth=1)
-        #     #plt.text(x, y+1 ,"label:"+self.id2label[label]+", acc:"+ str(prob), fontsize=15)
-        #     ax.add_patch(rect)
-        #
-        # plt.savefig(output_name)
-        # plt.close()
-
-        output_name = output_img_dir + '/' + self.data_name + '.png'
-        output_txt_name = output_txt_dir + '/' + self.data_name + '.txt'
-
-        ff = open(output_txt_name, 'w')
-        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
-        ax.imshow(self.data)
-
-        rect_xywh_over = []
-        label_over = []
-        prob_over = []
-        for [x, y, w, h], label, prob in zip(self.rect_xywh, infer_label, smx_list):
-            if prob > thres:
-                prob_over.append(prob)
-                label_over.append(label)
-                rect_xywh_over.append([x, y, w, h])
-
-        for [x, y, w, h], label, prob in zip(rect_xywh_over, label_over, prob_over):
-
-            rect = mpatches.Rectangle(
-                (x, y), w, h, alpha=0.2, facecolor='red', edgecolor='red', linewidth=1)
-            plt.text(x, y+1 ,"label:"+self.id2label[label]+", acc:"+ str(prob), fontsize=15)
-            ax.add_patch(rect)
-            txt = self.id2label[label] + " " + str(prob) + " " + str(x) + " " + str(y) + " " + str(x+w) + " " + str (y+h) + "\n"
-            ff.write(txt)
-
-        plt.savefig(output_name)
-        plt.close()
-        ff.close()
-
-        # 正解データのコピー
-        # shutil.copy2('./datasets/VOCDetection/grandtruth/'+ self.data_name + '.jpg', './output/images/'+ self.data_name + '_grandtruth.jpg')
-
     def __call__(self, index=0):
         self.rect_list, self.rect_xywh, self.rect_count = Ssearch(self.data, self.transform)
         def load_function(iter_idx):
-            images = torch.stack(
-                [self.rect_list[img_idx] for img_idx in range(self.rect_count)], dim=0)
+            images = torch.stack([self.rect_list[img_idx] for img_idx in range(self.rect_count)], dim=0)
             labels = torch.LongTensor([64 for label in range(self.rect_count)])
 
             return images, labels
