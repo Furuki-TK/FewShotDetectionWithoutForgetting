@@ -36,7 +36,8 @@ from pdb import set_trace as breakpoint
 _MINI_IMAGENET_DATASET_DIR = './datasets/MiniImagenet'
 _IMAGENET_DATASET_DIR = '../../datasets/Imagenet10k/images'
 _IMAGE_TEST_SET_DIR = './datasets'
-_PASCAL_VOC_DATASET_DIR = './datasets/VOCclassification/all'
+# _PASCAL_VOC_DATASET_DIR = './datasets/VOCclassification/all'
+_PASCAL_VOC_DATASET_DIR = './datasets/VOCclassification'
 _IMAGENET_LOWSHOT_BENCHMARK_CATEGORY_SPLITS_PATH = './data/IMAGENET_LOWSHOT_BENCHMARK_CATEGORY_SPLITS.json'
 label_memo = 'id2label.txt'
 
@@ -401,7 +402,7 @@ class VOCTrainSet(data.Dataset):
         transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
         self.transform = transforms.Compose(transforms_list)
 
-        tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'test')
+        tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'all', 'test')
         self.data = datasets.ImageFolder(tdir, self.transform)
         self.labels = [item[1] for item in self.data.imgs]
 

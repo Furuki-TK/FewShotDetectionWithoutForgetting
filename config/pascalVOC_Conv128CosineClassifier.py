@@ -24,10 +24,10 @@ data_test_opt['epoch_size'] = 1000
 config['data_train_opt'] = data_train_opt
 config['data_test_opt'] = data_test_opt
 
-config['max_num_epochs'] = 40
+config['max_num_epochs'] = 30
 
 networks = {}
-net_optionsF = {'userelu': False, 'in_planes':3, 'out_planes':[10,10,128,128], 'num_stages':4}
+net_optionsF = {'userelu': False, 'in_planes':3, 'out_planes':[64,64,128,128], 'num_stages':4}
 net_optim_paramsF = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(20, 0.1),(40, 0.006),(50, 0.0012),(60, 0.00024)]}
 networks['feat_model'] = {'def_file': 'architectures/ConvNet.py', 'pretrained': None, 'opt': net_optionsF, 'optim_params': net_optim_paramsF}
 

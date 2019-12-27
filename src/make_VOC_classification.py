@@ -14,8 +14,8 @@ import torch.utils.data as data
 import torchvision
 import torchvision.datasets as datasets
 
-phase = 'train'
-output_dir = '../datasets/VOCclassification'
+phase = 'val'
+output_dir = '/home/datasets/VOCclassification'
 class_names = ['aeroplane', 'bicycle','bird', 'boat', 'bottle',
                 'bus', 'car', 'cat', 'chair', 'cow',
                 'diningtable', 'dog' ,'horse', 'motorbike', 'person',
@@ -28,7 +28,7 @@ for class_name in class_names:
     if not os.path.exists(os.path.join(output_dir, phase ,class_name)):
         os.mkdir(os.path.join(output_dir, phase ,class_name))
 
-dataset = torchvision.datasets.VOCDetection("../../../datasets/PASCAL3D+_release1.1/PASCAL",image_set=phase)
+dataset = torchvision.datasets.VOCDetection("/home/datasets/VOCdetection/imageset_trainval",image_set=phase)
 
 num_data = len(dataset)#VOCデータ数
 data_count = 0

@@ -82,7 +82,8 @@ if __name__ ==  '__main__':
     f.close()
 
     # データの分割
-    test=file_list[:10] # 確認用
+    test=file_list[319:]
+    test.append(file_list[0]) # 確認用
 
     test1=file_list[0:1000]
     test2=file_list[1000:2000]
@@ -119,5 +120,9 @@ if __name__ ==  '__main__':
             algorithm.SS_classifer_opt(data_query)
     if args_opt.id == 6:
         for image_name in test6:
+            data_query = QuaryData(image_path=image_name)
+            algorithm.SS_classifer_opt(data_query)
+    if args_opt.id == 10:
+        for image_name in file_list:
             data_query = QuaryData(image_path=image_name)
             algorithm.SS_classifer_opt(data_query)

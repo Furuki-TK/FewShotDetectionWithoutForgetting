@@ -31,6 +31,7 @@ class Algorithm():
         self.set_log_file_handler()
 
         #self.logger.info('Algorithm options %s' % opt)
+        self.count = 0
         self.opt = opt
         self.init_all_networks()
         self.init_all_criterions()
@@ -391,6 +392,8 @@ class Algorithm():
         for key, network in self.networks.items():
             network.eval()
 
+        self.count += 1
+        self.logger.info('---------------------------------- %s ----------------------------------' % self.count)
         self.logger.info('Query : %s' % data_query.data_name)
         for idxt, query in enumerate(data_query()):
             self.logger.info('---> Selective_Search Result : %d' % data_query.rect_count)
@@ -402,6 +405,13 @@ class Algorithm():
             self.logger.info('---> Finish Detection')
             self.output_result(data_query, infer_label, smx_list)
             self.logger.info('---> Save Results')
+
+    def classifer_loss(self, data_query):
+        for key, network in self.networks.items():
+            network.eval()
+
+        self.classifer_loss_step(data_query)
+        print('finish')
 
     def output_result(self, data_query, infer_label, smx_list):
 

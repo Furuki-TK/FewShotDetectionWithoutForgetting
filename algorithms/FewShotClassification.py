@@ -24,7 +24,7 @@ class FewShotClassification(Algorithm):
         self.activate_dropout = (
             opt['activate_dropout'] if ('activate_dropout' in opt) else False)
         self.keep_best_model_metric_name = 'AccuracyNovel'
-        self.count = 0
+        self.count = 319 #image count (num is image ID)
 
     def allocate_tensors(self):
         self.tensors = {}
@@ -67,8 +67,6 @@ class FewShotClassification(Algorithm):
         process_type = 'entry'
         self.set_tensors(process_type, data_support)
         self.process_entry(data_support)
-
-
 
     def process_entry(self, data_support):
         images_train = self.tensors['images_train']
@@ -125,19 +123,20 @@ class FewShotClassification(Algorithm):
             h = h_max - y
         if y+h < 0:
             h = 0 - y
-        if w == 0:
+        if w <= 0:
             if x == w_max:
                 x = w_max - 1
                 w = 1
             else:
                 w = 1
-        if h == 0:
+        if h <= 0:
             if y == h_max:
                 y = h_max - 1
                 h = 1
             else:
                 h = 1
-                
+
+        # print(x, y, w, h)
         test_data = self.data_query.data[y:y+h, x:x+w]
         test_data = Image.fromarray(test_data)
         test_data = self.data_query.transform(test_data)
@@ -192,3 +191,33 @@ class FewShotClassification(Algorithm):
         self.infer_label = smx.argmax()
 
         return 1.0/self.infer_prob*100
+
+    def classifer_loss_step(self, query):
+        process_type = 'classifer'
+        self.set_tensors(process_type, query)
+        self.process_classifer_and_loss(query)
+
+
+    def process_classifer_and_loss(self, query):
+        images_test = self.tensors['images_test'].copy_(query)
+
+        self.feat_model.eval()
+
+        images_test_var = Variable(images_test)
+
+        batch_size, num_test_examples, channels, height, width = images_test.size()
+        features_test_var = self.feat_model(
+            images_test_var.view(batch_size * num_test_examples, channels, height, width)
+        )
+        features_test_var = features_test_var.view(
+            [batch_size, num_test_examples,] + list(features_test_var.size()[1:])
+        )
+
+        features_test_var = Variable(features_test_var.data, volatile=False)
+
+        #************************ APPLY CLASSIFIER *****************************
+        cls_scores_var = self.classifier(
+            features_test=features_test_var)
+        cls_scores_var = cls_scores_var.view(batch_size * num_test_examples, -1)
+
+        print(cls_scores_var)
