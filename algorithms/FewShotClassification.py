@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from torchvision import transforms
 import utils
 import scipy.optimize as optimize
 
@@ -13,13 +14,20 @@ from pdb import set_trace as breakpoint
 import time
 from tqdm import tqdm
 from PIL import Image
-
+import cv2
 from . import Algorithm
+
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 
 class FewShotClassification(Algorithm):
     def __init__(self, opt):
         Algorithm.__init__(self, opt)
+        self.gradient = None
         self.nKbase = torch.LongTensor()
         self.activate_dropout = (
             opt['activate_dropout'] if ('activate_dropout' in opt) else False)
@@ -192,14 +200,24 @@ class FewShotClassification(Algorithm):
 
         return 1.0/self.infer_prob*100
 
-    def classifer_loss_step(self, query):
+    def classifer_loss_step(self, query, query_name):
         process_type = 'classifer'
         self.set_tensors(process_type, query)
-        self.process_classifer_and_loss(query)
+        maps, map = self.process_classifer_and_loss(query)
 
+        maps = transforms.ToPILImage()(maps[0])
+
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+        ax.imshow(maps.resize((224,224)))
+        name = "./output/GradCam/" + 'GradCAM_' + query_name
+        plt.savefig(name)
+
+    def save_gradient(self, grad):
+        self.gradient = grad
 
     def process_classifer_and_loss(self, query):
         images_test = self.tensors['images_test'].copy_(query)
+        criterion  = self.criterions['loss']
 
         self.feat_model.eval()
 
@@ -209,15 +227,69 @@ class FewShotClassification(Algorithm):
         features_test_var = self.feat_model(
             images_test_var.view(batch_size * num_test_examples, channels, height, width)
         )
+        target_features = features_test_var
         features_test_var = features_test_var.view(
             [batch_size, num_test_examples,] + list(features_test_var.size()[1:])
         )
-
+        # print('size',features_test_var.size())
+        # gh = features_test_var.register_hook(self.save_gradient)
         features_test_var = Variable(features_test_var.data, volatile=False)
 
-        #************************ APPLY CLASSIFIER *****************************
-        cls_scores_var = self.classifier(
-            features_test=features_test_var)
-        cls_scores_var = cls_scores_var.view(batch_size * num_test_examples, -1)
 
-        print(cls_scores_var)
+        #************************ APPLY CLASSIFIER *****************************
+        cls_scores_var, cls_weights = self.classifier(
+            features_test=features_test_var)
+
+        cls_scores_var = cls_scores_var.view(batch_size * num_test_examples, -1)
+        # print('min',features_test_var.data.min(dim=1))
+        print('output : ',cls_scores_var)
+
+        smx = F.softmax(cls_scores_var.data, dim=1).cpu().numpy()
+        par = [[100.0]*20]
+        print('softmax', smx*par)
+
+        infer_label_prob, infer_label_id = cls_scores_var.data.max(dim=1)
+        print('pred id : ',infer_label_id,' ,pred prob : ',infer_label_prob)
+
+        # label_id = infer_label_id
+        label_id = torch.cuda.LongTensor([19])
+        target_weights = cls_weights[0][label_id]
+        # print('size :',target_weights.size())
+        weight = torch.cuda.FloatTensor()
+        weight = weight.resize_(128,5,5)
+        for i in range(128):
+            for j in range(5):
+                for k in range(5):
+                    weight[i][j][k] = target_weights[0][i*25:(i+1)*25].mean()
+
+        # print('target_weights : ',target_weights[0][0*25:1*25])
+        # print('target_weights : ',target_weights[0][1*25:2*25])
+        # print('target_weights mean : ',target_weights[0][0*25:1*25].mean())
+        # print('target_weights : ',target_weights[0][1*25:2*25].mean())
+        # print(weight[1])
+        target_features = target_features.view(128, 5, 5)
+        # print('target_features',target_features.size())
+        # print('weight',weight.size())
+
+        mask = F.relu((weight * target_features).sum(dim=0)).squeeze(0)
+
+        # print('mask', mask.size())
+
+        feature_maps = []
+        mask = cv2.resize(mask.data.cpu().numpy(), (84,84))
+        mask = mask - np.min(mask)
+
+        if np.max(mask) != 0:
+            mask = mask / np.max(mask)
+
+        query = query.view(3, 84, 84)
+        feature_map = np.float32(cv2.applyColorMap(np.uint8(255 * mask), cv2.COLORMAP_JET))
+        cam = feature_map + np.float32((np.uint8(np.transpose(query,(1,2,0))*255)))
+        cam = cam - np.min(cam)
+
+        if np.max(cam) != 0:
+            cam = cam / np.max(cam)
+
+        feature_maps.append(transforms.ToTensor()(cv2.cvtColor(np.uint8(255 * cam), cv2.COLOR_BGR2RGB)))
+
+        return feature_maps, feature_map

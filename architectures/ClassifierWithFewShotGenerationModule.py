@@ -266,15 +266,15 @@ class Classifier(nn.Module):
 
         cls_scores = self.scale_cls * torch.baddbmm(1.0,
             self.bias.view(1, 1, 1), 1.0, features, cls_weights.transpose(1,2))
-        return cls_scores
+        return cls_scores, cls_weights
 
 
     def forward(self, features_test):
 
-        cls_scores = self.apply_classification_weights(
+        cls_scores, cls_weights = self.apply_classification_weights(
             features_test, self.weight_both)
 
-        return cls_scores
+        return cls_scores, cls_weights
 
 
 def create_model(opt):
