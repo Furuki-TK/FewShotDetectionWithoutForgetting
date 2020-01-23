@@ -78,7 +78,7 @@ class AttentionBasedBlock(nn.Module):
         #   [batch_size x num_train_examples x nFeat] * [batch_size x nFeat x nKbase]
         AttentionCoeficients = self.scale_att * torch.bmm(Qe, wkeys)
         AttentionCoeficients = F.softmax(
-            AttentionCoeficients.view(batch_size*num_train_examples, nKbase),dim=1)
+            AttentionCoeficients.view(batch_size*num_train_examples, nKbase))
         AttentionCoeficients = AttentionCoeficients.view(
             batch_size, num_train_examples, nKbase)
 
@@ -231,8 +231,10 @@ class Classifier(nn.Module):
         #***********************************************************************
 
         # Concatenate the base and novel classification weights and return them.
-        self.weight_both = torch.cat([weight_base, weight_novel], dim=1)
+        weight_both = torch.cat([weight_base, weight_novel], dim=1)
         # weight_both shape: [batch_size x (nKbase + nKnovel) x num_channels]
+
+        return weight_both
 
 
     def apply_classification_weights(self, features, cls_weights):
@@ -266,15 +268,64 @@ class Classifier(nn.Module):
 
         cls_scores = self.scale_cls * torch.baddbmm(1.0,
             self.bias.view(1, 1, 1), 1.0, features, cls_weights.transpose(1,2))
-        return cls_scores, cls_weights
+        return cls_scores
 
 
-    def forward(self, features_test):
+    def forward(self, features_test, Kbase_ids, features_train=None, labels_train=None):
+        """Recognize on the test examples both base and novel categories.
 
-        cls_scores, cls_weights = self.apply_classification_weights(
-            features_test, self.weight_both)
+        Recognize on the test examples (i.e., `features_test`) both base and
+        novel categories using the approach proposed on our CVPR2018 paper
+        "Dynamic Few-Shot Visual Learning without Forgetting". In order to
+        classify the test examples the provided training data for the novel
+        categories (i.e., `features_train` and `labels_train`) are used in order
+        to generate classification weight vectors of those novel categories and
+        then those classification weight vectors are applied on the features of
+        the test examples.
 
-        return cls_scores, cls_weights
+        Args:
+            features_test: A 3D tensor with shape
+                [batch_size x num_test_examples x num_channels] that represents
+                the features of the test examples each training episode in the
+                batch. Those examples can come both from base and novel
+                categories. `batch_size` is the number of training episodes in
+                the batch, `num_test_examples` is the number of test examples
+                in each training episode, and `num_channels` is the number of
+                feature channels.
+            Kbase_ids: A 2D tensor with shape [batch_size x nKbase] that for
+                each training episode in the the batch it includes the indices
+                of the base categories that are being used. `nKbase` is the
+                number of base categories.
+            features_train: A 3D tensor with shape
+                [batch_size x num_train_examples x num_channels] that represents
+                the features of the training examples of each training episode
+                 in the batch. `num_train_examples` is the number of train
+                examples in each training episode. Those training examples are
+                from the novel categories. If features_train is None then the
+                current function will only return the classification scores for
+                the base categories.
+            labels_train: A 3D tensor with shape
+                [batch_size x num_train_examples x nKnovel] that represents
+                the labels (encoded as 1-hot vectors of lenght nKnovel) of the
+                training examples of each training episode in the batch.
+                `nKnovel` is the number of novel categories. If labels_train is
+                None then the current function will return only the
+                classification scores for the base categories.
+
+        Return:
+            cls_scores: A 3D tensor with shape
+                [batch_size x num_test_examples x (nKbase + nKnovel)] that
+                represents the classification scores of the test examples
+                for the nKbase and nKnovel novel categories. If features_train
+                or labels_train are None the only the classification scores of
+                the base categories are returned. In that case the shape of
+                cls_scores is [batch_size x num_test_examples x nKbase].
+        """
+        cls_weights = self.get_classification_weights(
+            Kbase_ids, features_train, labels_train)
+        cls_scores = self.apply_classification_weights(
+            features_test, cls_weights)
+        return cls_scores
 
 
 def create_model(opt):

@@ -60,6 +60,7 @@ exp_directory = os.path.join('.','experiments', args_opt.config)
 # Load the configuration params of the experiment
 print('Launching experiment: %s' % exp_config_file)
 config = imp.load_source("",exp_config_file).config
+config['model_dir'] = exp_directory
 config['exp_dir'] = exp_directory # the place where logs, models, and other stuff will be stored
 print("Loading experiment %s from file: %s" % (args_opt.config, exp_config_file))
 print("Generated logs, snapshots, and model files will be stored on %s" % (config['exp_dir']))

@@ -49,17 +49,18 @@ if __name__ == '__main__':
     # Load the configuration params of the experiment
     print('Launching experiment: %s' % exp_config_file)
     config = imp.load_source("",exp_config_file).config
-    config['thres'] = 30.0
-    NN = '_' + str(config['thres']) + '%_test'
-    config['img_dir'] = '/home/output/GradCam/images'+ NN
-    config['txt_dir'] = '/home/output/GradCam/txt' + NN
+    # config['thres'] = 30.0
+    # NN = '_' + str(config['thres']) + '%_test'
+    # config['img_dir'] = '/home/output/GradCam/images'+ NN
+    # config['txt_dir'] = '/home/output/GradCam/txt' + NN
     config['exp_dir'] = exp_directory
     config['model_dir'] = exp_model_directory
-    if not os.path.exists(config['img_dir']):
-        os.makedirs(config['img_dir'])
-
-    if not os.path.exists(config['txt_dir']):
-        os.makedirs(config['txt_dir'])
+    config['networks']['classifier']['def_file'] = 'architectures/ClassifierWithFewShotGenerationModule_new.py'
+    # if not os.path.exists(config['img_dir']):
+    #     os.makedirs(config['img_dir'])
+    #
+    # if not os.path.exists(config['txt_dir']):
+    #     os.makedirs(config['txt_dir'])
 
     print('Loading experiment %s from file: %s' %
           (args_opt.config, exp_config_file))
@@ -78,11 +79,13 @@ if __name__ == '__main__':
         algorithm.load_to_gpu()
 
     print("Entry Support Data.....")
-    if 'VOC' in args_opt.config:
-        data_support = VOCTrainSet(phase='train', category=5, nExemplars=5)
-        algorithm.entry(data_support)
-    else:
-        raise ValueError('No file dataset')
+    data_support = VOCTrainSet(phase='train', category=5, nExemplars=5)
+    algorithm.entry(data_support)
+    # if 'VOC' in args_opt.config:
+    #     data_support = VOCTrainSet(phase='train', category=5, nExemplars=5)
+    #     algorithm.entry(data_support)
+    # else:
+    #     raise ValueError('No file dataset')
 
 
     # データの読み込み

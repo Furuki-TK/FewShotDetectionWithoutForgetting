@@ -16,6 +16,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import selectivesearch
+import xml.etree.ElementTree as ET
 
 import torch
 import torch.utils.data as data
@@ -376,8 +377,123 @@ class ImageNetTrainSet(data.Dataset):
 class VOCTrainSet(data.Dataset):
     def __init__(self,
                  phase='train',
+                 base='mini',
                  category=5, # number of novel categories.
                  nExemplars=5, # number of training examples per novel category.
+                 ):
+
+        random.seed(1)
+        self.phase = phase
+        self.category = category
+        self.nExemplars = nExemplars
+        self.base = base
+        #assert(split=='train' or split=='val')
+        self.name = 'VOC_Phase_' + phase
+        self.dataset_name = 'VOC_crop'
+
+        base_classes = [0,1,2,3,4,5,6,7,8,9]
+        novel_classes_val_phase = [10,11,12,13,14]
+        novel_classes_test_phase = [15,16,17,18,19]
+        novel_classes = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+
+        transforms_list = []
+        transforms_list.append(transforms.Resize(84))
+        transforms_list.append(transforms.CenterCrop(84))
+        transforms_list.append(lambda x: np.asarray(x))
+        transforms_list.append(transforms.ToTensor())
+        mean_pix = [0.485, 0.456, 0.406]
+        std_pix = [0.229, 0.224, 0.225]
+        transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+        self.transform = transforms.Compose(transforms_list)
+
+        tdir = os.path.join(_PASCAL_VOC_DATASET_DIR, 'all', 'test')
+        self.data = datasets.ImageFolder(tdir, self.transform)
+        self.labels = [item[1] for item in self.data.imgs]
+
+        self.label2ind = buildLabelIndex(self.labels)
+        self.labelIds = sorted(self.label2ind.keys())
+        self.num_cats = len(self.labelIds)
+        assert(self.num_cats==20)
+
+        # self.labelIds_base = base_classes
+        # self.num_cats_base = len(self.labelIds_base)
+        #
+        # self.labelIds_novel = sorted(random.sample(novel_classes_val_phase, k=self.category))
+        # self.labelIds_novel = novel_classes_val_phase + novel_classes_test_phase
+        # self.num_cats_novel = len(self.labelIds_novel)
+        #
+        # #重複するクラスがないか
+        # intersection = set(self.labelIds_base) & set(self.labelIds_novel)
+        # assert(len(intersection) == 0)
+
+        # 20クラスを登録
+        self.labelIds_novel = novel_classes
+        # 10クラスを登録
+        # self.labelIds_novel = novel_classes_val_phase + novel_classes_test_phase
+        self.num_novels = len(self.labelIds_novel)
+
+        f = open(label_memo,'r')
+        buf = f.read().split()
+        self.id2label = {}
+        for n in buf:
+            id,label_name = n.split(',')
+            self.id2label[int(id)] = label_name
+
+        f.close()
+
+    def __call__(self, index=0):
+
+        def load_function(iter_idx):
+            # img_count = [0] * self.num_cats
+            if self.base == 'mini':
+                mini_boost = 64 - min(self.labelIds_novel)
+            elif self.base == 'voc':
+                mini_boost = 0
+
+            img_count = [0] * (20+mini_boost)
+            img_list = []
+            label_list = []
+
+            for novel_label in self.labelIds_novel:
+                buf = random.sample(self.label2ind[novel_label],k=self.nExemplars)
+                for image_id in buf:
+                    if img_count[novel_label] < self.nExemplars:
+                        buf_img, _ = self.data[image_id]
+                        img_list.append(buf_img)
+                        label_list.append(novel_label+mini_boost)
+                        img_count[novel_label] += 1
+
+            images = torch.stack(
+                [img_list[img_idx] for img_idx in range(sum(img_count))], dim=0)
+            labels = torch.LongTensor([label for label in label_list])
+
+            return images, labels
+
+        tnt_dataset = tnt.dataset.ListDataset(
+            elem_list=range(1), load=load_function)
+        data_loader = tnt_dataset.parallel(
+            batch_size=1,
+            num_workers=0,
+            shuffle=False)
+
+        return data_loader
+
+    def __len__(self):
+        return len(self.data)
+
+
+class VOCevaluate(data.Dataset):
+    def __init__(self,
+                 phase='train',
+                 category=5, # number of novel categories.
+                 nExemplars=5, # number of training examples per novel category.
+                 nKnovel=5, # number of novel categories.
+                 nKbase=64, # number of base categories.
+                 nTestNovel=15, # number of test examples for all the novel categories.
+                 nTestBase=15, # number of test examples for all the base categories.
+                 batch_size=1, # number of training episodes per batch.
+                 num_workers=0,
+                 epoch_size=200, # number of batches per epoch.
                  ):
 
         random.seed(1)
@@ -431,10 +547,138 @@ class VOCTrainSet(data.Dataset):
 
         f.close()
 
+        self.nTestNovel = nTestNovel
+        self.nTestBase = nTestBase
+        self.batch_size = batch_size
+        self.epoch_size = epoch_size
+        self.num_workers = num_workers
+        self.is_eval_mode = True
+
+    def sampleImageIdsFrom(self, cat_id, sample_size=1):
+
+        assert(cat_id in self.label2ind)
+        assert(len(self.label2ind[cat_id]) >= sample_size)
+        # Note: random.sample samples elements without replacement.
+        return random.sample(self.label2ind[cat_id], sample_size)
+
+    def sampleCategories(self, cat_set, sample_size=1):
+
+        if cat_set=='base':
+            labelIds = self.labelIds_base
+        elif cat_set=='novel':
+            labelIds = self.labelIds_novel
+        else:
+            raise ValueError('Not recognized category set {}'.format(cat_set))
+
+        assert(len(labelIds) >= sample_size)
+        # return sample_size unique categories chosen from labelIds set of
+        # categories (that can be either self.labelIds_base or self.labelIds_novel)
+        # Note: random.sample samples elements without replacement.
+        return random.sample(labelIds, sample_size)
+
+    def sample_base_and_novel_categories(self, nKbase, nKnovel):
+
+        if self.is_eval_mode:
+            assert(nKnovel <= self.dataset.num_cats_novel)
+            # sample from the set of base categories 'nKbase' number of base
+            # categories.
+            Kbase = sorted(self.sampleCategories('base', nKbase))
+            # sample from the set of novel categories 'nKnovel' number of novel
+            # categories.
+            Knovel = sorted(self.sampleCategories('novel', nKnovel))
+        else:
+            # sample from the set of base categories 'nKnovel' + 'nKbase' number
+            # of categories.
+            cats_ids = self.sampleCategories('base', nKnovel+nKbase)
+            assert(len(cats_ids) == (nKnovel+nKbase))
+            # Randomly pick 'nKnovel' number of fake novel categories and keep
+            # the rest as base categories.
+            random.shuffle(cats_ids)
+            Knovel = sorted(cats_ids[:nKnovel])
+            Kbase = sorted(cats_ids[nKnovel:])
+
+        return Kbase, Knovel
+
+    def sample_test_examples_for_base_categories(self, Kbase, nTestBase):
+
+        Tbase = []
+        if len(Kbase) > 0:
+            # Sample for each base category a number images such that the total
+            # number sampled images of all categories to be equal to `nTestBase`.
+            KbaseIndices = np.random.choice(
+                np.arange(len(Kbase)), size=nTestBase, replace=True)
+            KbaseIndices, NumImagesPerCategory = np.unique(
+                KbaseIndices, return_counts=True)
+
+            for Kbase_idx, NumImages in zip(KbaseIndices, NumImagesPerCategory):
+                imd_ids = self.sampleImageIdsFrom(
+                    Kbase[Kbase_idx], sample_size=NumImages)
+                Tbase += [(img_id, Kbase_idx) for img_id in imd_ids]
+
+        assert(len(Tbase) == nTestBase)
+
+        return Tbase
+
+    def sample_train_and_test_examples_for_novel_categories(
+            self, Knovel, nTestNovel, nExemplars, nKbase):
+
+        if len(Knovel) == 0:
+            return [], []
+
+        nKnovel = len(Knovel)
+        Tnovel = []
+        Exemplars = []
+        assert((nTestNovel % nKnovel) == 0)
+        nEvalExamplesPerClass = nTestNovel / nKnovel
+
+        for Knovel_idx in range(len(Knovel)):
+            imd_ids = self.sampleImageIdsFrom(
+                Knovel[Knovel_idx],
+                sample_size=(nEvalExamplesPerClass + nExemplars))
+
+            imds_tnovel = imd_ids[:nEvalExamplesPerClass]
+            imds_ememplars = imd_ids[nEvalExamplesPerClass:]
+
+            Tnovel += [(img_id, nKbase+Knovel_idx) for img_id in imds_tnovel]
+            Exemplars += [(img_id, nKbase+Knovel_idx) for img_id in imds_ememplars]
+        assert(len(Tnovel) == nTestNovel)
+        assert(len(Exemplars) == len(Knovel) * nExemplars)
+        random.shuffle(Exemplars)
+
+        return Tnovel, Exemplars
+
+    def sample_episode(self):
+        """Samples a training episode."""
+        nKnovel = self.nKnovel
+        nKbase = self.nKbase
+        nTestNovel = self.nTestNovel
+        nTestBase = self.nTestBase
+        nExemplars = self.nExemplars
+
+        Kbase, Knovel = self.sample_base_and_novel_categories(nKbase, nKnovel)
+        Tbase = self.sample_test_examples_for_base_categories(Kbase, nTestBase)
+        Tnovel, Exemplars = self.sample_train_and_test_examples_for_novel_categories(
+            Knovel, nTestNovel, nExemplars, nKbase)
+
+        # concatenate the base and novel category examples.
+        Test = Tbase + Tnovel
+        random.shuffle(Test)
+        Kall = Kbase + Knovel
+
+        return Exemplars, Test, Kall, nKbase
+
+    def createExamplesTensorData(self, examples):
+
+        images = torch.stack(
+            [self.dataset[img_idx][0] for img_idx, _ in examples], dim=0)
+        labels = torch.LongTensor([label for _, label in examples])
+        return images, labels
+
     def __call__(self, index=0):
 
         def load_function(iter_idx):
-            img_count = [0] * self.num_cats
+            # img_count = [0] * self.num_cats
+            img_count = [0] * 74
             img_list = []
             label_list = []
 
@@ -444,7 +688,7 @@ class VOCTrainSet(data.Dataset):
                     if img_count[novel_label] < self.nExemplars:
                         buf_img, _ = self.data[image_id]
                         img_list.append(buf_img)
-                        label_list.append(novel_label)
+                        label_list.append(novel_label+54)
                         img_count[novel_label] += 1
 
             images = torch.stack(
@@ -465,7 +709,7 @@ class VOCTrainSet(data.Dataset):
     def __len__(self):
         return len(self.data)
 
-
+# selectivesearch + CNN 用
 class QuaryData(data.Dataset):
     def __init__(self,
                 image_path):
@@ -503,6 +747,65 @@ class QuaryData(data.Dataset):
                 shuffle=False)
         else:
             data_loader = ["a","aa"]
+
+        return data_loader
+
+    def __len__(self):
+        return len(self.data)
+
+# Grad-CAM + selectivesearch 用
+class QuaryVOC(data.Dataset):
+    def __init__(self,
+                image_path):
+
+        self.data_name = image_path.split('/')[-1].split('.')[0]
+        self.data = np.array(Image.open(image_path))
+        assert(self.data.all() != None)
+
+        self.input_size = self.data.shape
+        self.dataset_name = 'VOC'
+
+        transforms_list = []
+        transforms_list.append(transforms.Resize(84))
+        transforms_list.append(transforms.CenterCrop(84))
+        transforms_list.append(lambda x: np.asarray(x))
+        transforms_list.append(transforms.ToTensor())
+        mean_pix = [0.485, 0.456, 0.406]
+        std_pix = [0.229, 0.224, 0.225]
+        transforms_list.append(transforms.Normalize(mean=mean_pix, std=std_pix))
+        self.transform = transforms.Compose(transforms_list)
+
+        xml_list = os.listdir(os.path.join(image_path.split('/JPEGImages')[0],'Annotations'))
+        if self.data_name + '.xml' in xml_list:
+            FILE = os.path.join(image_path.split('/JPEGImages')[0],'Annotations', self.data_name + '.xml')
+            file = open(FILE)
+            tree = ET.parse(file)
+            file.close()
+            root = tree.getroot()
+            self.label_list = []
+            for obj in root.iter('object'):
+                cls = obj.find('name').text
+                if cls not in self.label_list:
+                    self.label_list.append(cls)
+
+    def __call__(self, index=0):
+        input = Image.fromarray(self.data)
+        input = self.transform(input)
+
+        def load_function(iter_idx):
+            image = input
+            label = torch.LongTensor([64])
+
+            return image, label
+
+
+        tnt_dataset = tnt.dataset.ListDataset(
+            elem_list=range(1), load=load_function)
+        data_loader = tnt_dataset.parallel(
+            batch_size=1,
+            num_workers=0,
+            shuffle=False)
+
 
         return data_loader
 

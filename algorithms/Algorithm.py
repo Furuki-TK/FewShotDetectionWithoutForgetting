@@ -406,6 +406,54 @@ class Algorithm():
             self.output_result(data_query, infer_label, smx_list)
             self.logger.info('---> Save Results')
 
+    def GradCam_SS_opt(self, data_query):
+        for key, network in self.networks.items():
+            network.eval()
+
+        for idxt, query in enumerate(data_query()):
+            bbox_list, cam_list = self.gradcam_and_detection_step(query, data_query)
+            self.output(data_query, bbox_list, cam_list)
+
+    def output(self, data_query, bbox_list, cam_list):
+        output_image_name = self.opt['img_dir'] + '/' + data_query.data_name + '.png'
+        output_cam_name = self.opt['cam_dir'] + '/' + data_query.data_name + '.png'
+        output_txt_name = self.opt['txt_dir'] + '/' + data_query.data_name + '.txt'
+
+        # result(image, txt)
+        f = open(output_txt_name, 'w')
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+        ax.imshow(data_query.data)
+
+        for bbox_txt in bbox_list:
+            f.write(bbox_txt)
+            bbox_txt.replace('\n','')
+            label, prob, x, y, xw, yh = bbox_txt.split(" ")
+            rect = mpatches.Rectangle(
+                (int(x), int(y)), int(xw)-int(x), int(yh)-int(y), fill=False, edgecolor='red', linewidth=1)
+            ax.add_patch(rect)
+
+        f.close()
+        plt.savefig(output_image_name)
+        plt.close()
+
+        # Grad-CAM(cam)
+        num_label = len(data_query.label_list)
+        fig, ax = plt.subplots(ncols=2, nrows=num_label, figsize=(10, 10),squeeze=False)
+        for i, cam in enumerate(cam_list):
+            ax[i,0].imshow(cam_list[cam])
+            ax[i,0].set_title(cam)
+            ax[i,1].imshow(data_query.data)
+            ax[i,1].set_title(cam)
+            for bbox_txt in bbox_list:
+                bbox_txt.replace('\n','')
+                label, prob, x, y, xw, yh = bbox_txt.split(" ")
+                if label == cam:
+                    rect = mpatches.Rectangle(
+                        (int(x), int(y)), int(xw)-int(x), int(yh)-int(y), fill=False, edgecolor='red', linewidth=1)
+                    ax[i,1].add_patch(rect)
+
+        plt.savefig(output_cam_name)
+
     def classifer_loss(self, data_query):
         for key, network in self.networks.items():
             network.eval()
